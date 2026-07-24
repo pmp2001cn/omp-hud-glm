@@ -19,7 +19,7 @@
     "extension",
     "usage-monitor"
   ],
-  "author": "",
+  "author": "Simon Wang",
   "license": "MIT",
   "engines": {
     "bun": ">=1.1.0"

@@ -26,7 +26,8 @@ GLM Coding Plan 用量 + 上下文用量彩色状态栏扩展，用于 [Oh My Pi
 ### 方式一：install 脚本（推荐）
 
 ```powershell
-cd D:\Projects\omp-glm-hub
+git clone https://github.com/pmp2001cn/omp-glm-hub.git
+cd omp-glm-hub
 powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
@@ -38,7 +39,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 ```yaml
 extensions:
-  - D:/Projects/omp-glm-hub/src/glm-hub.ts
+  - /path/to/omp-glm-hub/src/glm-hub.ts
 ```
 
 > 注意：路径用正斜杠 `/`，不要用反斜杠。
