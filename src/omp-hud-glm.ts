@@ -235,6 +235,12 @@ function plainBar(usedPct: number, style: string, segments = 16): string {
   return s.filled.repeat(filled) + s.empty.repeat(segments - filled);
 }
 
+// 按可见宽度右补空格对齐（剔除 ANSI 转义后计宽）
+function padVisible(text: string, width: number): string {
+  const visible = text.replace(/\x1b\[[0-9;]*m/g, "");
+  return text + " ".repeat(Math.max(0, width - visible.length));
+}
+
 // 上下文段：标签 + 进度条 + 百分比 + 已用/窗口
 function renderContextSegment(
   cu: { tokens?: number; contextWindow?: number; percent?: number } | null,
@@ -465,24 +471,33 @@ export default function (pi): void {
           ctx.ui?.notify?.("用量查询返回空数据", "warning");
           return;
         }
+        // 渲染到 widget（真彩色，与状态栏一致的视觉），列对齐
         const lines: string[] = [];
-        if (u.level) lines.push(`套餐：${u.level.toUpperCase()}`);
+        if (u.level) lines.push(`${fg(C_ACCENT, "套餐")} ${fg(C_DIM, u.level.toUpperCase())}`);
+        const LABEL_W = 4; // 标签列宽：5h / 每周 / MCP
+        const bar5 = coloredBar(u.hour5UsedPct, config.barStyle);
         lines.push(
-          `5h ${plainBar(u.hour5UsedPct, config.barStyle)} ${u.hour5UsedPct}%${u.hour5ResetText ? " · " + u.hour5ResetText : ""}`,
+          `${padVisible(fg(C_ACCENT, "5h"), LABEL_W)} ${bar5} ${fg(colorForUsage(u.hour5UsedPct), `${u.hour5UsedPct}%`)}${u.hour5ResetText ? " " + fg(C_DIM, `·${u.hour5ResetText}`) : ""}`,
         );
         if (u.hasWeekly) {
+          const barW = coloredBar(u.weeklyUsedPct, config.barStyle);
           lines.push(
-            `每周 ${plainBar(u.weeklyUsedPct, config.barStyle)} ${u.weeklyUsedPct}%${u.weeklyResetText ? " · " + u.weeklyResetText : ""}`,
+            `${padVisible(fg(C_ACCENT, "每周"), LABEL_W)} ${barW} ${fg(colorForUsage(u.weeklyUsedPct), `${u.weeklyUsedPct}%`)}${u.weeklyResetText ? " " + fg(C_DIM, `·${u.weeklyResetText}`) : ""}`,
           );
         }
         if (u.mcpTotal != null) {
           const mcpPct = u.mcpTotal > 0 ? Math.round(((u.mcpUsed ?? 0) / u.mcpTotal) * 100) : 0;
-          lines.push(`MCP 月度：${u.mcpUsed ?? 0}/${u.mcpTotal} 次 (${mcpPct}%)`);
+          const mcpLabel = padVisible(fg(C_ACCENT, "MCP"), LABEL_W);
+          lines.push(
+            `${mcpLabel} ${fg(C_DIM, `${u.mcpUsed ?? 0}/${u.mcpTotal} 次`)} ${fg(colorForUsage(mcpPct), `(${mcpPct}%)`)}`,
+          );
           if (u.mcpDetails && u.mcpDetails.length > 0) {
-            lines.push(`  明细：${u.mcpDetails.map((d) => `${d.modelCode} ${d.usage}`).join(" · ")}`);
+            const detail = u.mcpDetails.map((d) => `${d.modelCode} ${fg(C_DIM, String(d.usage))}`).join(fg(C_SEP, " · "));
+            lines.push(`${padVisible(fg(C_DIM, "明细"), LABEL_W)} ${detail}`);
           }
         }
-        ctx.ui?.notify?.(lines.join("\n"), "info");
+        ctx.ui?.setWidget?.(WIDGET_KEY, lines, { placement: "belowEditor" });
+        ctx.ui?.notify?.("GLM 用量详情已显示在状态栏（5 分钟后自动恢复实时刷新）", "info");
       } catch (e) {
         ctx.ui?.notify?.(
           `GLM 用量查询失败：${e instanceof Error ? e.message : String(e)}`,
