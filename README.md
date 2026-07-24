@@ -5,11 +5,11 @@ GLM Coding Plan 用量 + 上下文用量彩色状态栏插件，用于 [Oh My Pi
 在编辑器下方常驻显示两个指标：
 
 ```
-  中文系统：上下文 ▰▰▰▰▱▱▱▱▱▱ 13.2% 135K/1M │ GLM PRO 使用率 ▰▱▱▱▱▱▱▱▱▱ 5% ·2小时44分
-  英文系统：Context ▰▰▰▰▱▱▱▱▱▱ 13.2% 135K/1M │ GLM PRO 5h ▰▱▱▱▱▱▱▱▱▱ 5% ·2h44m
+  中文：上下文 ▰▰▰▰▱▱▱▱▱▱ 13.2% 135K/1M │ PRO使用率 ▰▱▱▱▱▱▱▱▱▱ 5% ·2小时44分
+  英文：Context ▰▰▰▰▱▱▱▱▱▱ 13.2% 135K/1M │ GLM PRO 5h ▰▱▱▱▱▱▱▱▱▱ 5% ·2h44m
 ```
 
-- **自适应语种** — 自动检测系统语言：中文系统全中文界面，英文系统全英文界面（`Intl.DateTimeFormat` 检测，无需配置）
+- **多语种** — 自动检测系统语言（中文系统全中文、英文系统全英文），亦可在 setup 中手动选自动/中文/英文
 - **上下文用量** — 来自 OMP 核心精确 token 计数，自动跟随模型 contextWindow 变化（200K / 128K / 1M 等）
 - **GLM Coding Plan 用量** — 调智谱用量查询 API，显示 5h / 每周额度、重置倒计时、MCP 各模型明细
 - **彩色分级** — 已用 <50% 绿 / 50-79% 黄 / ≥80% 红
@@ -20,7 +20,7 @@ GLM Coding Plan 用量 + 上下文用量彩色状态栏插件，用于 [Oh My Pi
 
 | 命令 | 作用 |
 |---|---|
-| `/omp-hud-glm:setup` | 交互式配置：设置 API Key、选进度条样式、选单行/双行布局 |
+| `/omp-hud-glm:setup` | 交互式配置：选语言、设置 API Key、选进度条样式、选单行/双行布局 |
 | `/omp-hud-glm:usage` | 查询 GLM 用量详情（含套餐、5h、每周、MCP 各模型明细） |
 
 ## 安装
@@ -64,7 +64,8 @@ GLM 用量查询需要智谱 API Key（与 `zhipu-coding-plan` provider 共用�
 ```json
 {
   "barStyle": "block",
-  "layout": "auto"
+  "layout": "auto",
+  "language": "auto"
 }
 ```
 
@@ -72,6 +73,7 @@ GLM 用量查询需要智谱 API Key（与 `zhipu-coding-plan` provider 共用�
 |---|---|---|
 | `barStyle` | `block` / `classic` / `dot` / `line` | 进度条字符样式 |
 | `layout` | `auto` / `one` / `two` | auto 按终端宽度自动选单行/双行 |
+| `language` | `auto` / `zh` / `en` | auto 自动检测系统语言；zh 强制中文；en 强制英文 |
 
 也可通过 `/omp-hud-glm:setup` 命令交互式修改，即时生效并持久化。
 

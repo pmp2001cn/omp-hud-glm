@@ -2,10 +2,10 @@
 //
 // 功能：
 //   - 编辑器下方常驻 widget，显示上下文用量 + GLM Coding Plan 5h/每周额度
-//   - /omp-hud-glm:setup 命令：配置 API Key、进度条样式、单行/双行布局
+//   - /omp-hud-glm:setup 命令：选语言、配置 API Key、进度条样式、单行/双行布局
 //   - /omp-hud-glm:usage 命令：查询 GLM 用量详情（含 MCP 各模型明细）
 //   - auto 布局：按终端宽度自动选单行（宽屏）或两行（窄屏，如手机）
-//   - 自适应语种：中文系统全中文界面，英文系统全英文界面（自动检测）
+//   - 语种：自动检测系统语言，亦可在 setup 中手动选自动/中文/英文
 //
 // 上下文数据来自 OMP 核心 ctx.getContextUsage()（精确 token 计数，自动跟随模型变化）。
 // GLM 数据来自智谱用量 API（monitor 端点，不消耗 coding plan 额度）。
@@ -37,7 +37,7 @@ const C_ERR = "#f7768e";
 const C_DIM = "#9aa5ce";
 const C_SEP = "#4c566a";
 
-// === 语种检测：中文系统→中文界面，否则英文界面（跨平台，勿用 process.env.LANG）===
+// === 系统语种检测（auto 模式用；跨平台，勿用 process.env.LANG）===
 const SYSTEM_LOCALE = (() => {
   try {
     return Intl.DateTimeFormat().resolvedOptions().locale || "en-US";
@@ -45,14 +45,14 @@ const SYSTEM_LOCALE = (() => {
     return "en-US";
   }
 })();
-const IS_ZH = SYSTEM_LOCALE.toLowerCase().startsWith("zh");
+const SYSTEM_IS_ZH = SYSTEM_LOCALE.toLowerCase().startsWith("zh");
 
 // === 翻译表：所有用户可见字符串 ===
 const zhStrings = {
   // widget 状态栏
   ctxLabel: "上下文",
   ctxNoData: "上下文：暂无数据",
-  glmTag: (level: string) => `GLM${level ? " " + level.toUpperCase() : ""} 使用率`,
+  glmTag: (level: string) => (level ? `${level.toUpperCase()}使用率` : "GLM使用率"),
   weeklyTag: "周",
   widgetNoKey: "  GLM 用量：未配置 API Key",
   widgetError: (msg: string) => `  GLM：${msg}`,
@@ -64,8 +64,10 @@ const zhStrings = {
   durDay: (d: number) => `${d}天`,
   durDayHour: (d: number, h: number) => `${d}天${h}小时`,
   // setup 命令
-  setupDesc: "配置 GLM 用量 widget（API Key、进度条样式、单行/双行布局）",
-  inputTitle: "配置智谱 API Key（用于查询用量，走 monitor 端点不消耗额度）",
+  setupDesc: "配置 GLM 用量 widget（语言、API Key、进度条样式、单行/双行布局）",
+  langSwitched: "已切换为中文",
+  apiKeyHint: "配置智谱 API Key：与 zhipu-coding-plan 共用同一个 key；用量查询走 monitor 端点，不消耗 Coding Plan 额度。",
+  inputTitle: "智谱 API Key",
   inputPhHas: "已配置，留空保持不变",
   inputPhNew: "粘贴你的智谱 API Key",
   keySaved: "✓ API Key 已保存到 ~/.omp/agent/.omp-hud-glm-key",
@@ -117,8 +119,10 @@ const enStrings = {
   durHourMin: (h: number, m: number) => `${h}h${m}m`,
   durDay: (d: number) => `${d}d`,
   durDayHour: (d: number, h: number) => `${d}d${h}h`,
-  setupDesc: "Configure GLM usage widget (API Key, bar style, one/two-line layout)",
-  inputTitle: "Configure Zhipu API Key (queries the monitor endpoint, no quota consumed)",
+  setupDesc: "Configure GLM usage widget (language, API Key, bar style, one/two-line layout)",
+  langSwitched: "Switched to English",
+  apiKeyHint: "Configure Zhipu API Key: shared with zhipu-coding-plan; uses the monitor endpoint, no Coding Plan quota consumed.",
+  inputTitle: "Zhipu API Key",
   inputPhHas: "Already configured, leave blank to keep",
   inputPhNew: "Paste your Zhipu API Key",
   keySaved: "✓ API Key saved to ~/.omp/agent/.omp-hud-glm-key",
@@ -156,14 +160,31 @@ const enStrings = {
 };
 
 type I18n = typeof zhStrings;
-const t: I18n = IS_ZH ? zhStrings : enStrings;
 
-interface OmpHudGlmConfig {
-  barStyle: string;  // block | classic | dot | line
-  layout: string;    // auto | one | two
+// 当前生效语种与翻译表（setup 选语言 / loadConfig 后更新）
+let currentLang: "zh" | "en" = SYSTEM_IS_ZH ? "zh" : "en";
+let t: I18n = currentLang === "zh" ? zhStrings : enStrings;
+
+// 把配置里的 language（auto|zh|en）解析为实际语种
+function resolveLang(language: string): "zh" | "en" {
+  if (language === "zh") return "zh";
+  if (language === "en") return "en";
+  return SYSTEM_IS_ZH ? "zh" : "en"; // auto
 }
 
-const DEFAULT_CONFIG: OmpHudGlmConfig = { barStyle: "block", layout: "auto" };
+// 应用语种：更新 currentLang 与翻译表 t，所有后续渲染/提示立即跟随
+function applyLanguage(language: string): void {
+  currentLang = resolveLang(language);
+  t = currentLang === "zh" ? zhStrings : enStrings;
+}
+
+interface OmpHudGlmConfig {
+  barStyle: string;   // block | classic | dot | line
+  layout: string;     // auto | one | two
+  language: string;   // auto | zh | en
+}
+
+const DEFAULT_CONFIG: OmpHudGlmConfig = { barStyle: "block", layout: "auto", language: "auto" };
 
 function agentDir(): string {
   const home = process.env.USERPROFILE || process.env.HOME || "";
@@ -192,6 +213,7 @@ async function loadConfig(): Promise<OmpHudGlmConfig> {
         return {
           barStyle: BAR_STYLES[c.barStyle] ? c.barStyle : "block",
           layout: ["auto", "one", "two"].includes(c.layout) ? c.layout : "auto",
+          language: ["auto", "zh", "en"].includes(c.language) ? c.language : "auto",
         };
       }
     } catch {
@@ -404,7 +426,7 @@ function useOneLine(config: OmpHudGlmConfig): boolean {
   if (config.layout === "two") return false;
   // auto：窄屏（手机）用两行，宽屏合并
   const cols = process.stdout.columns ?? parseInt(process.env.COLUMNS ?? "120", 10) ?? 120;
-  return cols >= (IS_ZH ? 120 : 110);
+  return cols >= (currentLang === "zh" ? 120 : 110);
 }
 
 // 渲染 widget 行（数组）：单行合并或两行分离
@@ -441,6 +463,7 @@ export default function (pi): void {
 
   async function reloadConfig(): Promise<void> {
     config = await loadConfig();
+    applyLanguage(config.language);
   }
 
   function renderWidgets(ctx, u: ParsedUsage | null): void {
@@ -509,12 +532,27 @@ export default function (pi): void {
     renderWidgets(ctx, lastUsage);
   });
 
-  // /omp-hud-glm:setup：交互式配置（API Key、进度条样式、单行/双行布局）
+  // /omp-hud-glm:setup：交互式配置（语言、API Key、进度条样式、单行/双行布局）
   pi.registerCommand("omp-hud-glm:setup", {
     description: t.setupDesc,
     handler: async (_args, ctx) => {
-      // 1. 配置 API Key
+      // 1. 选语言（菜单固定英文，「中文」选项用中文，选择后后续提示跟随所选语言）
+      const langLabels = [
+        `Auto (detect from system)${config.language === "auto" ? " (current)" : ""}`,
+        `中文${config.language === "zh" ? " (current)" : ""}`,
+        `English${config.language === "en" ? " (current)" : ""}`,
+      ];
+      const pickedLang = await ctx.ui?.select?.("Select language", langLabels);
+      if (!pickedLang) return;
+      if (pickedLang.startsWith("Auto")) config.language = "auto";
+      else if (pickedLang.startsWith("中文")) config.language = "zh";
+      else config.language = "en";
+      applyLanguage(config.language); // 立即应用，后续提示用所选语言
+      ctx.ui?.notify?.(t.langSwitched, "info");
+
+      // 2. 配置 API Key（先 notify 提示说明，再弹出输入框）
       if (ctx.ui?.input) {
+        ctx.ui?.notify?.(t.apiKeyHint, "info");
         const existingKey = await resolveApiKey();
         const keyInput = await ctx.ui.input(t.inputTitle, existingKey ? t.inputPhHas : t.inputPhNew);
         if (keyInput !== undefined) {
@@ -535,7 +573,7 @@ export default function (pi): void {
         ctx.ui?.notify?.(t.noInput, "warning");
       }
 
-      // 2. 选进度条样式
+      // 3. 选进度条样式
       const styleLabels = Object.entries(BAR_STYLES).map(
         ([k]) => `${t.barStyleLabel(k)}${k === config.barStyle ? ` ${t.current}` : ""}`,
       );
@@ -546,7 +584,7 @@ export default function (pi): void {
       )?.[0];
       if (styleKey) config.barStyle = styleKey;
 
-      // 3. 选布局
+      // 4. 选布局
       const layoutLabels = [
         `${t.layoutAuto}${config.layout === "auto" ? ` ${t.current}` : ""}`,
         `${t.layoutOne}${config.layout === "one" ? ` ${t.current}` : ""}`,
@@ -587,7 +625,7 @@ export default function (pi): void {
         const pctToken = (pct: number): "success" | "warning" | "error" =>
           pct >= 80 ? "error" : pct >= 50 ? "warning" : "success";
         // 标签列宽：中文标签统一 2 字（4 列），英文标签更长（Weekly/Details=7 列）
-        const LABEL_W = IS_ZH ? 4 : 8;
+        const LABEL_W = currentLang === "zh" ? 4 : 8;
         // 渲染详情行（用系统主题色，非自写 ANSI）
         const renderDetails = (theme: { fg: (c: string, t: string) => string }): string[] => {
           const out: string[] = [];
