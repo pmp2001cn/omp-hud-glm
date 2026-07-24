@@ -235,10 +235,11 @@ function plainBar(usedPct: number, style: string, segments = 16): string {
   return s.filled.repeat(filled) + s.empty.repeat(segments - filled);
 }
 
-// 按可见宽度右补空格对齐（剔除 ANSI 转义后计宽）
+// 按显示宽度右补空格对齐：剔除 ANSI，中文/全角计 2 列，ASCII 计 1 列
 function padVisible(text: string, width: number): string {
   const visible = text.replace(/\x1b\[[0-9;]*m/g, "");
-  return text + " ".repeat(Math.max(0, width - visible.length));
+  const dispW = [...visible].reduce((w, ch) => w + (ch.charCodeAt(0) > 0x7f ? 2 : 1), 0);
+  return text + " ".repeat(Math.max(0, width - dispW));
 }
 
 // 上下文段：标签 + 进度条 + 百分比 + 已用/窗口
@@ -477,8 +478,8 @@ export default function (pi): void {
         // 渲染详情行（用系统主题色，非自写 ANSI）
         const renderDetails = (theme: { fg: (c: string, t: string) => string }): string[] => {
           const out: string[] = [];
-          if (u.level) out.push(`${theme.fg("accent", "套餐")} ${theme.fg("muted", u.level.toUpperCase())}`);
           const LABEL_W = 4;
+          if (u.level) out.push(`${padVisible(theme.fg("accent", "套餐"), LABEL_W)} ${theme.fg("muted", u.level.toUpperCase())}`);
           const bar = (pct: number) => {
             const s = BAR_STYLES[config.barStyle] ?? BAR_STYLES.block;
             const filled = Math.round((pct / 100) * 10);
@@ -498,8 +499,9 @@ export default function (pi): void {
               `${padVisible(theme.fg("accent", "MCP"), LABEL_W)} ${theme.fg("muted", `${u.mcpUsed ?? 0}/${u.mcpTotal} 次`)} ${theme.fg(pctToken(mcpPct), `(${mcpPct}%)`)}`,
             );
             if (u.mcpDetails && u.mcpDetails.length > 0) {
-              const detail = u.mcpDetails.map((d) => `${d.modelCode} ${theme.fg("dim", String(d.usage))}`).join(theme.fg("dim", " · "));
-              out.push(`${padVisible(theme.fg("dim", "明细"), LABEL_W)} ${detail}`);
+              // 明细内容与上方数值列对齐（标签2字+空格=第4列起），标签用 accent 统一
+              const detail = u.mcpDetails.map((d) => `${d.modelCode} ${theme.fg("dim", String(d.usage))}`).join(theme.fg("dim", "  ·  "));
+              out.push(`${padVisible(theme.fg("accent", "明细"), LABEL_W)} ${detail}`);
             }
           }
           return out;
