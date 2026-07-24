@@ -275,8 +275,8 @@ interface ParsedUsage {
   hour5UsedPct: number;
   weeklyUsedPct: number;
   hasWeekly: boolean;
-  hour5ResetText: string;
-  weeklyResetText: string;
+  hour5ResetMs?: number;
+  weeklyResetMs?: number;
   mcpUsed?: number;
   mcpTotal?: number;
   mcpDetails?: McpUsageDetail[];
@@ -358,8 +358,8 @@ export function parseUsage(resp: QuotaResponse): ParsedUsage | null {
     hour5UsedPct: hour5?.percentage ?? 0,
     weeklyUsedPct: weekly?.percentage ?? 0,
     hasWeekly: tokenLimits.length > 1,
-    hour5ResetText: fmtReset(hour5?.nextResetTime),
-    weeklyResetText: fmtReset(weekly?.nextResetTime),
+    hour5ResetMs: hour5?.nextResetTime,
+    weeklyResetMs: weekly?.nextResetTime,
     mcpUsed: mcp?.currentValue,
     mcpTotal: mcp?.usage,
     mcpDetails: mcp?.usageDetails?.filter((d) => d.usage > 0),
@@ -408,13 +408,15 @@ function renderGlmSegment(u: ParsedUsage, style: string): string {
   const tag = fg(C_ACCENT, t.glmTag(u.level));
   const bar5 = coloredBar(u.hour5UsedPct, style);
   const pct5 = fg(c5, `${u.hour5UsedPct}%`);
-  const reset5 = u.hour5ResetText ? fg(C_DIM, `·${u.hour5ResetText}`) : "";
+  const _r5 = fmtReset(u.hour5ResetMs);
+  const reset5 = _r5 ? fg(C_DIM, `·${_r5}`) : "";
   let seg = `${tag} ${bar5} ${pct5} ${reset5}`;
   if (u.hasWeekly) {
     const cw = colorForUsage(u.weeklyUsedPct);
     const barW = coloredBar(u.weeklyUsedPct, style);
     const pctW = fg(cw, `${u.weeklyUsedPct}%`);
-    const resetW = u.weeklyResetText ? fg(C_DIM, `·${u.weeklyResetText}`) : "";
+    const _rW = fmtReset(u.weeklyResetMs);
+    const resetW = _rW ? fg(C_DIM, `·${_rW}`) : "";
     seg += ` ${fg(C_ACCENT, t.weeklyTag)} ${barW} ${pctW} ${resetW}`;
   }
   return seg;
@@ -635,12 +637,14 @@ export default function (pi): void {
             const filled = Math.round((pct / 100) * 10);
             return theme.fg(pctToken(pct), s.filled.repeat(filled)) + theme.fg("dim", s.empty.repeat(10 - filled));
           };
+          const r5 = fmtReset(u.hour5ResetMs);
           out.push(
-            `${padVisible(theme.fg("accent", t.label5h), LABEL_W)} ${bar(u.hour5UsedPct)} ${theme.fg(pctToken(u.hour5UsedPct), `${u.hour5UsedPct}%`)}${u.hour5ResetText ? " " + theme.fg("dim", `·${u.hour5ResetText}`) : ""}`,
+            `${padVisible(theme.fg("accent", t.label5h), LABEL_W)} ${bar(u.hour5UsedPct)} ${theme.fg(pctToken(u.hour5UsedPct), `${u.hour5UsedPct}%`)}${r5 ? " " + theme.fg("dim", `·${r5}`) : ""}`,
           );
           if (u.hasWeekly) {
+            const rW = fmtReset(u.weeklyResetMs);
             out.push(
-              `${padVisible(theme.fg("accent", t.labelWeekly), LABEL_W)} ${bar(u.weeklyUsedPct)} ${theme.fg(pctToken(u.weeklyUsedPct), `${u.weeklyUsedPct}%`)}${u.weeklyResetText ? " " + theme.fg("dim", `·${u.weeklyResetText}`) : ""}`,
+              `${padVisible(theme.fg("accent", t.labelWeekly), LABEL_W)} ${bar(u.weeklyUsedPct)} ${theme.fg(pctToken(u.weeklyUsedPct), `${u.weeklyUsedPct}%`)}${rW ? " " + theme.fg("dim", `·${rW}`) : ""}`,
             );
           }
           if (u.mcpTotal != null) {
