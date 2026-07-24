@@ -1,13 +1,15 @@
 {
-  "name": "omp-glm-hub",
+  "name": "omp-hud-glm",
   "version": "1.0.0",
   "description": "GLM Coding Plan 用量与上下文用量彩色状态栏扩展，用于 Oh My Pi (OMP) coding agent",
   "type": "module",
-  "main": "src/omp-glm-hub.ts",
+  "main": "src/omp-hud-glm.ts",
   "scripts": {
-    "install-ext": "powershell -ExecutionPolicy Bypass -File ./install.ps1",
-    "check": "bun --check src/omp-glm-hub.ts",
-    "test": "bun --bun test src/omp-glm-hub.ts"
+    "check": "bun --check src/omp-hud-glm.ts",
+    "test": "bun --bun test src/omp-hud-glm.ts"
+  },
+  "omp": {
+    "extensions": ["src/omp-hud-glm.ts"]
   },
   "keywords": [
     "omp",
@@ -16,7 +18,8 @@
     "zhipu",
     "coding-plan",
     "statusline",
-    "extension",
+    "widget",
+    "plugin",
     "usage-monitor"
   ],
   "author": "Simon Wang",

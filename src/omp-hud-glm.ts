@@ -2,8 +2,8 @@
 //
 // 功能：
 //   - 编辑器下方常驻 widget，显示上下文用量 + GLM Coding Plan 5h/每周额度
-//   - /omp-glm-config 命令：交互式选择进度条样式、单行/两行布局
-//   - /omp-glm-usage 命令：查询 GLM 用量详情（含 MCP 各模型明细）
+//   - /omp-hud-glm:setup 命令：配置 API Key、进度条样式、单行/双行布局
+//   - /omp-hud-glm:usage 命令：查询 GLM 用量详情（含 MCP 各模型明细）
 //   - auto 布局：按终端宽度自动选单行（宽屏）或两行（窄屏，如手机）
 //
 // 上下文数据来自 OMP 核心 ctx.getContextUsage()（精确 token 计数，自动跟随模型变化）。
@@ -11,15 +11,14 @@
 //
 // API Key 来源（按优先级）：
 //   1. 环境变量 ZHIPU_API_KEY
-//   2. 本地文件 ~/.omp/agent/.omp-glm-usage-key
-// 配置文件：~/.omp/agent/.omp-glm-config.json
+//   2. 本地文件 ~/.omp/agent/.omp-hud-glm-key
+// 配置文件：~/.omp/agent/.omp-hud-glm-config.json
 //
-// 向后兼容：若新文件不存在，自动回退读取旧名（.glm-config.json / .glm-usage-key）。
+// 向后兼容：若新文件不存在，自动回退读取历史名（.omp-glm-* / .glm-*），config 命中则迁移到新名。
 
 const ENDPOINT = "https://open.bigmodel.cn/api/monitor/usage/quota/limit";
 const REFRESH_MS = 5 * 60 * 1000;
-const WIDGET_KEY = "omp-glm-usage";
-const CTX_WIDGET_KEY = "omp-glm-ctx";
+const WIDGET_KEY = "omp-hud-glm";
 
 // 进度条样式映射：filled/empty 字符对
 const BAR_STYLES: Record<string, { filled: string; empty: string; label: string }> = {
@@ -37,29 +36,33 @@ const C_ERR = "#f7768e";
 const C_DIM = "#9aa5ce";
 const C_SEP = "#4c566a";
 
-interface OmpGlmConfig {
+interface OmpHudGlmConfig {
   barStyle: string;  // block | classic | dot | line
   layout: string;    // auto | one | two
 }
 
-const DEFAULT_CONFIG: OmpGlmConfig = { barStyle: "block", layout: "auto" };
+const DEFAULT_CONFIG: OmpHudGlmConfig = { barStyle: "block", layout: "auto" };
 
 function agentDir(): string {
   const home = process.env.USERPROFILE || process.env.HOME || "";
   return `${home}/.omp/agent`;
 }
 
-function configFilePath(): string {
-  return `${agentDir()}/.omp-glm-config.json`;
-}
+// 配置/Key 文件路径（当前名）+ 历史名回退（三代改名累积）
+const CONFIG_PATHS = [
+  `${agentDir()}/.omp-hud-glm-config.json`,
+  `${agentDir()}/.omp-glm-config.json`,
+  `${agentDir()}/.glm-config.json`,
+];
+const KEY_PATHS = [
+  `${agentDir()}/.omp-hud-glm-key`,
+  `${agentDir()}/.omp-glm-usage-key`,
+  `${agentDir()}/.glm-usage-key`,
+];
 
-function keyFilePath(): string {
-  return `${agentDir()}/.omp-glm-usage-key`;
-}
-
-// 读取配置（失败回退默认值）。新文件不存在时回退旧名并自动迁移。
-async function loadConfig(): Promise<OmpGlmConfig> {
-  const readAt = async (p: string): Promise<OmpGlmConfig | null> => {
+// 读取配置（失败回退默认值）。优先读新文件，命中历史名则迁移到新名。
+async function loadConfig(): Promise<OmpHudGlmConfig> {
+  const readAt = async (p: string): Promise<OmpHudGlmConfig | null> => {
     try {
       const f = Bun.file(p);
       if (await f.exists()) {
@@ -75,21 +78,20 @@ async function loadConfig(): Promise<OmpGlmConfig> {
     return null;
   };
 
-  const cur = await readAt(configFilePath());
-  if (cur) return cur;
-
-  // 回退旧名（.glm-config.json），命中则顺带迁移到新名
-  const legacy = await readAt(`${agentDir()}/.glm-config.json`);
-  if (legacy) {
-    await saveConfig(legacy);
-    return legacy;
+  for (const p of CONFIG_PATHS) {
+    const c = await readAt(p);
+    if (c) {
+      // 命中历史名，迁移到新名
+      if (p !== CONFIG_PATHS[0]) await saveConfig(c);
+      return c;
+    }
   }
   return { ...DEFAULT_CONFIG };
 }
 
-async function saveConfig(c: OmpGlmConfig): Promise<void> {
+async function saveConfig(c: OmpHudGlmConfig): Promise<void> {
   try {
-    await Bun.write(configFilePath(), JSON.stringify(c, null, 2));
+    await Bun.write(CONFIG_PATHS[0], JSON.stringify(c, null, 2));
   } catch {
     // 写入失败静默忽略
   }
@@ -153,8 +155,8 @@ function colorForUsage(usedPct: number): string {
 export async function resolveApiKey(): Promise<string | undefined> {
   const env = process.env.ZHIPU_API_KEY;
   if (env && env.trim()) return env.trim();
-  // 新名优先，回退旧名（.glm-usage-key），不自动迁移以免动 key 文件
-  for (const p of [keyFilePath(), `${agentDir()}/.glm-usage-key`]) {
+  // 新名优先，回退历史名，不自动迁移以免动 key 文件
+  for (const p of KEY_PATHS) {
     try {
       const f = Bun.file(p);
       if (await f.exists()) {
@@ -266,13 +268,8 @@ function renderGlmSegment(u: ParsedUsage, style: string): string {
   return seg;
 }
 
-// 终端可见宽度（去除 ANSI）
-function visibleLen(s: string): number {
-  return s.replace(/\x1b\[[0-9;]*m/g, "").length;
-}
-
 // 根据配置和终端宽度决定单行还是两行
-function useOneLine(config: OmpGlmConfig): boolean {
+function useOneLine(config: OmpHudGlmConfig): boolean {
   if (config.layout === "one") return true;
   if (config.layout === "two") return false;
   // auto：窄屏（手机）用两行，宽屏合并
@@ -284,7 +281,7 @@ function useOneLine(config: OmpGlmConfig): boolean {
 export function renderWidgetLines(
   cu: { tokens?: number; contextWindow?: number; percent?: number } | null,
   u: ParsedUsage | null,
-  config: OmpGlmConfig,
+  config: OmpHudGlmConfig,
 ): string[] {
   const ctxSeg = renderContextSegment(cu, config.barStyle);
   if (!u) return [`  ${ctxSeg}`];
@@ -309,7 +306,7 @@ export default function (pi): void {
   let warnedMissingKey = false;
   let lastUsage: ParsedUsage | null = null;
   let lastRefreshAt = 0;
-  let config: OmpGlmConfig = { ...DEFAULT_CONFIG };
+  let config: OmpHudGlmConfig = { ...DEFAULT_CONFIG };
   const MIN_REFRESH_GAP = 60_000;
 
   async function reloadConfig(): Promise<void> {
@@ -339,7 +336,7 @@ export default function (pi): void {
       if (!warnedMissingKey && ctx.ui?.notify) {
         warnedMissingKey = true;
         ctx.ui.notify(
-          "GLM 用量扩展：未检测到 API Key。请设置环境变量 ZHIPU_API_KEY，或在 ~/.omp/agent/.omp-glm-usage-key 写入 key。",
+          "GLM 用量扩展：未检测到 API Key。运行 /omp-hud-glm:setup 配置，或设置环境变量 ZHIPU_API_KEY。",
           "warning",
         );
       }
@@ -385,11 +382,39 @@ export default function (pi): void {
     renderWidgets(ctx, lastUsage);
   });
 
-  // /omp-glm-config：交互式设置面板
-  pi.registerCommand("omp-glm-config", {
-    description: "配置 GLM 用量 widget（进度条样式、单行/两行布局）",
+  // /omp-hud-glm:setup：交互式配置（API Key、进度条样式、单行/双行布局）
+  pi.registerCommand("omp-hud-glm:setup", {
+    description: "配置 GLM 用量 widget（API Key、进度条样式、单行/双行布局）",
     handler: async (_args, ctx) => {
-      // 1. 选进度条样式
+      // 1. 配置 API Key
+      if (ctx.ui?.input) {
+        const existingKey = await resolveApiKey();
+        const keyInput = await ctx.ui.input(
+          "配置智谱 API Key（用于查询用量，走 monitor 端点不消耗额度）",
+          existingKey ? "已配置，留空保持不变" : "粘贴你的智谱 API Key",
+        );
+        if (keyInput !== undefined) {
+          const trimmed = keyInput.trim();
+          if (trimmed) {
+            try {
+              await Bun.write(KEY_PATHS[0], trimmed);
+              warnedMissingKey = false;
+              ctx.ui?.notify?.("✓ API Key 已保存到 ~/.omp/agent/.omp-hud-glm-key", "info");
+            } catch {
+              ctx.ui?.notify?.("API Key 保存失败，请检查文件权限", "error");
+            }
+          } else if (!existingKey && !process.env.ZHIPU_API_KEY) {
+            ctx.ui?.notify?.(
+              "未设置 API Key。可运行 setup 重新配置，或设环境变量 ZHIPU_API_KEY。",
+              "warning",
+            );
+          }
+        }
+      } else {
+        ctx.ui?.notify?.("当前环境不支持交互式输入，请手动配置 API Key", "warning");
+      }
+
+      // 2. 选进度条样式
       const styleLabels = Object.entries(BAR_STYLES).map(
         ([k, v]) => `${v.label}${k === config.barStyle ? " (当前)" : ""}`,
       );
@@ -400,11 +425,11 @@ export default function (pi): void {
       )?.[0];
       if (styleKey) config.barStyle = styleKey;
 
-      // 2. 选布局
+      // 3. 选布局
       const layoutLabels = [
-        `auto 自动（宽屏单行/窄屏两行）${config.layout === "auto" ? " (当前)" : ""}`,
+        `auto 自动（宽屏单行/窄屏双行）${config.layout === "auto" ? " (当前)" : ""}`,
         `one 单行${config.layout === "one" ? " (当前)" : ""}`,
-        `two 两行${config.layout === "two" ? " (当前)" : ""}`,
+        `two 双行${config.layout === "two" ? " (当前)" : ""}`,
       ];
       const pickedLayout = await ctx.ui?.select?.("选择布局", layoutLabels);
       if (!pickedLayout) return;
@@ -415,6 +440,7 @@ export default function (pi): void {
       await saveConfig(config);
       // 立即重渲染
       renderWidgets(ctx, lastUsage);
+      void refreshGlm(ctx);
       ctx.ui?.notify?.(
         `已保存：进度条 ${BAR_STYLES[config.barStyle].label}，布局 ${config.layout}`,
         "info",
@@ -422,14 +448,14 @@ export default function (pi): void {
     },
   });
 
-  pi.registerCommand("omp-glm-usage", {
+  pi.registerCommand("omp-hud-glm:usage", {
     description: "查询 GLM Coding Plan 用量详情",
     handler: async (_args, ctx) => {
       try {
         const apiKey = await resolveApiKey();
         if (!apiKey) {
           ctx.ui?.notify?.(
-            "未配置 API Key（ZHIPU_API_KEY 或 ~/.omp/agent/.omp-glm-usage-key），无法查询。",
+            "未配置 API Key。运行 /omp-hud-glm:setup 配置，或设置环境变量 ZHIPU_API_KEY。",
             "error",
           );
           return;

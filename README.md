@@ -1,6 +1,6 @@
-# omp-glm-hub
+# omp-hud-glm
 
-GLM Coding Plan 用量 + 上下文用量彩色状态栏扩展，用于 [Oh My Pi (OMP)](https://github.com/can1357/oh-my-pi) coding agent。
+GLM Coding Plan 用量 + 上下文用量彩色状态栏插件，用于 [Oh My Pi (OMP)](https://github.com/can1357/oh-my-pi) coding agent。
 
 在编辑器下方常驻显示两个指标：
 
@@ -12,55 +12,52 @@ GLM Coding Plan 用量 + 上下文用量彩色状态栏扩展，用于 [Oh My Pi
 - **GLM Coding Plan 用量** — 调智谱用量查询 API，显示 5h / 每周额度、重置倒计时、MCP 各模型明细
 - **彩色分级** — 已用 <50% 绿 / 50-79% 黄 / ≥80% 红
 - **4 种进度条样式** — `▰▱` `█░` `●·` `━─`
-- **单行 / 两行布局** — auto 模式按终端宽度自动切换（手机窄屏自动两行）
+- **单行 / 双行布局** — auto 模式按终端宽度自动切换（手机窄屏自动双行）
 
 ## 命令
 
 | 命令 | 作用 |
 |---|---|
-| `/omp-glm-config` | 交互式配置面板：选进度条样式、选单行/两行布局 |
-| `/omp-glm-usage` | 查询 GLM 用量详情（含套餐、5h、每周、MCP 各模型明细） |
+| `/omp-hud-glm:setup` | 交互式配置：设置 API Key、选进度条样式、选单行/双行布局 |
+| `/omp-hud-glm:usage` | 查询 GLM 用量详情（含套餐、5h、每周、MCP 各模型明细） |
 
 ## 安装
 
-### 方式一：install 脚本（推荐）
+### 方式一：一行安装（推荐）
 
-```powershell
-git clone https://github.com/pmp2001cn/omp-glm-hub.git
-cd omp-glm-hub
-powershell -ExecutionPolicy Bypass -File .\install.ps1
+```bash
+omp plugin install github:pmp2001cn/omp-hud-glm
 ```
 
-脚本会把扩展路径写入 OMP 全局配置（`~/.omp/agent/config.yml` 的 `extensions` 数组），改项目源码即生效，无需拷贝。重启 OMP 即可。
+安装后重启 OMP 即可。后续 `omp plugin upgrade omp-hud-glm` 更新。
 
-### 方式二：手动配置
+### 方式二：本地开发安装
 
-编辑 `~/.omp/agent/config.yml`，在 `extensions` 数组中加入项目源文件路径：
-
-```yaml
-extensions:
-  - /path/to/omp-glm-hub/src/omp-glm-hub.ts
+```bash
+git clone https://github.com/pmp2001cn/omp-hud-glm.git
+cd omp-hud-glm
+omp plugin install .
 ```
-
-> 注意：路径用正斜杠 `/`，不要用反斜杠。
 
 ### 配置 API Key
 
-GLM 用量查询需要智谱 API Key（与 `zhipu-coding-plan` provider 共用同一个 key）。二选一：
+GLM 用量查询需要智谱 API Key（与 `zhipu-coding-plan` provider 共用同一个 key）。三选一：
 
-**方式 A（推荐，私密）** — 写入 key 文件：
+**方式 A（推荐）** — 运行 `/omp-hud-glm:setup`，交互式粘贴 Key。
+
+**方式 B** — 写入 key 文件：
 
 ```powershell
-"你的智谱API_KEY" | Out-File -NoNewline "$env:USERPROFILE\.omp\agent\.omp-glm-usage-key"
+"你的智谱API_KEY" | Out-File -NoNewline "$env:USERPROFILE\.omp\agent\.omp-hud-glm-key"
 ```
 
-**方式 B** — 设系统环境变量 `ZHIPU_API_KEY`。
+**方式 C** — 设系统环境变量 `ZHIPU_API_KEY`。
 
 > 用量查询走智谱 monitor 端点（`/api/monitor/usage/quota/limit`），**不消耗 Coding Plan 额度**。
 
 ## 配置文件
 
-扩展配置持久化在 `~/.omp/agent/.omp-glm-config.json`：
+扩展配置持久化在 `~/.omp/agent/.omp-hud-glm-config.json`：
 
 ```json
 {
@@ -72,9 +69,11 @@ GLM 用量查询需要智谱 API Key（与 `zhipu-coding-plan` provider 共用�
 | 字段 | 值 | 说明 |
 |---|---|---|
 | `barStyle` | `block` / `classic` / `dot` / `line` | 进度条字符样式 |
-| `layout` | `auto` / `one` / `two` | auto 按终端宽度自动选单行/两行 |
+| `layout` | `auto` / `one` / `two` | auto 按终端宽度自动选单行/双行 |
 
-也可通过 `/omp-glm-config` 命令交互式修改，即时生效并持久化。
+也可通过 `/omp-hud-glm:setup` 命令交互式修改，即时生效并持久化。
+
+> 升级自旧版本（omp-glm-hub / glm-usage）时，历史配置和 Key 文件会自动迁移，无需手动处理。
 
 ## 数据来源
 
@@ -107,8 +106,8 @@ Authorization: <API_KEY>
 
 ## 技术说明
 
-- **不是 OMP 插件，是扩展（extension）** — 放在 OMP 自动发现的 `~/.omp/agent/extensions/` 或通过 config `extensions` 数组加载
-- **不会被 OMP 更新覆盖** — 扩展在用户数据目录，npm 更新只动 `node_modules`
+- **OMP 插件** — 通过 `package.json` 的 `omp.extensions` 声明，`omp plugin install` 安装
+- **不会被 OMP 更新覆盖** — 插件在用户数据目录，npm 更新只动 OMP 本体
 - **改源码即生效** — 重启 OMP 自动重新加载（带 `?mtime` 缓存清除）
 
 ## License
