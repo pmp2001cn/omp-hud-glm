@@ -5,6 +5,7 @@
 //   - /omp-hud-glm:setup 命令：配置 API Key、进度条样式、单行/双行布局
 //   - /omp-hud-glm:usage 命令：查询 GLM 用量详情（含 MCP 各模型明细）
 //   - auto 布局：按终端宽度自动选单行（宽屏）或两行（窄屏，如手机）
+//   - 自适应语种：中文系统全中文界面，英文系统全英文界面（自动检测）
 //
 // 上下文数据来自 OMP 核心 ctx.getContextUsage()（精确 token 计数，自动跟随模型变化）。
 // GLM 数据来自智谱用量 API（monitor 端点，不消耗 coding plan 额度）。
@@ -20,12 +21,12 @@ const ENDPOINT = "https://open.bigmodel.cn/api/monitor/usage/quota/limit";
 const REFRESH_MS = 5 * 60 * 1000;
 const WIDGET_KEY = "omp-hud-glm";
 
-// 进度条样式映射：filled/empty 字符对
-const BAR_STYLES: Record<string, { filled: string; empty: string; label: string }> = {
-  block:   { filled: "▰", empty: "▱", label: "▰▱ 实心方块" },
-  classic: { filled: "█", empty: "░", label: "█░ 经典方块" },
-  dot:     { filled: "●", empty: "·", label: "●· 圆点" },
-  line:    { filled: "━", empty: "─", label: "━─ 细横线" },
+// 进度条样式映射：filled/empty 字符对（文案走 i18n.barStyleLabel）
+const BAR_STYLES: Record<string, { filled: string; empty: string }> = {
+  block:   { filled: "▰", empty: "▱" },
+  classic: { filled: "█", empty: "░" },
+  dot:     { filled: "●", empty: "·" },
+  line:    { filled: "━", empty: "─" },
 };
 
 // 颜色常量（真彩色，暗色背景调亮）
@@ -35,6 +36,127 @@ const C_WARN = "#e0af68";
 const C_ERR = "#f7768e";
 const C_DIM = "#9aa5ce";
 const C_SEP = "#4c566a";
+
+// === 语种检测：中文系统→中文界面，否则英文界面（跨平台，勿用 process.env.LANG）===
+const SYSTEM_LOCALE = (() => {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().locale || "en-US";
+  } catch {
+    return "en-US";
+  }
+})();
+const IS_ZH = SYSTEM_LOCALE.toLowerCase().startsWith("zh");
+
+// === 翻译表：所有用户可见字符串 ===
+const zhStrings = {
+  // widget 状态栏
+  ctxLabel: "上下文",
+  ctxNoData: "上下文：暂无数据",
+  glmTag: (level: string) => `GLM${level ? " " + level.toUpperCase() : ""} 使用率`,
+  weeklyTag: "周",
+  widgetNoKey: "  GLM 用量：未配置 API Key",
+  widgetError: (msg: string) => `  GLM：${msg}`,
+  // 时间格式（fmtReset）
+  resetDone: "已重置",
+  durMin: (m: number) => `${m}分`,
+  durHour: (h: number) => `${h}小时`,
+  durHourMin: (h: number, m: number) => `${h}小时${m}分`,
+  durDay: (d: number) => `${d}天`,
+  durDayHour: (d: number, h: number) => `${d}天${h}小时`,
+  // setup 命令
+  setupDesc: "配置 GLM 用量 widget（API Key、进度条样式、单行/双行布局）",
+  inputTitle: "配置智谱 API Key（用于查询用量，走 monitor 端点不消耗额度）",
+  inputPhHas: "已配置，留空保持不变",
+  inputPhNew: "粘贴你的智谱 API Key",
+  keySaved: "✓ API Key 已保存到 ~/.omp/agent/.omp-hud-glm-key",
+  keySaveFail: "API Key 保存失败，请检查文件权限",
+  keyNotSet: "未设置 API Key。可运行 setup 重新配置，或设环境变量 ZHIPU_API_KEY。",
+  noInput: "当前环境不支持交互式输入，请手动配置 API Key",
+  selectBar: "选择进度条样式",
+  selectLayout: "选择布局",
+  current: "(当前)",
+  layoutAuto: "auto 自动（宽屏单行/窄屏双行）",
+  layoutOne: "one 单行",
+  layoutTwo: "two 双行",
+  saved: (bar: string, layout: string) => `已保存：进度条 ${bar}，布局 ${layout}`,
+  barStyleLabel: (key: string): string => {
+    const m: Record<string, string> = {
+      block: "▰▱ 实心方块", classic: "█░ 经典方块", dot: "●· 圆点", line: "━─ 细横线",
+    };
+    return m[key] ?? key;
+  },
+  // usage overlay
+  usageDesc: "查询 GLM Coding Plan 用量详情",
+  noApiKey: "未配置 API Key。运行 /omp-hud-glm:setup 配置，或设置环境变量 ZHIPU_API_KEY。",
+  emptyData: "用量查询返回空数据",
+  usageTitle: "GLM Coding Plan 用量",
+  labelPlan: "套餐",
+  label5h: "5h",
+  labelWeekly: "每周",
+  labelMcp: "MCP",
+  mcpCalls: (used: number, total: number) => `${used}/${total} 次`,
+  labelDetails: "明细",
+  closeHint: "按 Esc 或 q 关闭",
+  usageFail: (msg: string) => `GLM 用量查询失败：${msg}`,
+  // refreshGlm
+  notifyNoKey: "GLM 用量扩展：未检测到 API Key。运行 /omp-hud-glm:setup 配置，或设置环境变量 ZHIPU_API_KEY。",
+  queryError: "查询出错",
+  quotaFail: "用量查询失败",
+};
+
+const enStrings = {
+  ctxLabel: "Context",
+  ctxNoData: "Context: no data",
+  glmTag: (level: string) => `GLM${level ? " " + level.toUpperCase() : ""} 5h`,
+  weeklyTag: "Wk",
+  widgetNoKey: "  GLM usage: API Key not configured",
+  widgetError: (msg: string) => `  GLM: ${msg}`,
+  resetDone: "reset",
+  durMin: (m: number) => `${m}m`,
+  durHour: (h: number) => `${h}h`,
+  durHourMin: (h: number, m: number) => `${h}h${m}m`,
+  durDay: (d: number) => `${d}d`,
+  durDayHour: (d: number, h: number) => `${d}d${h}h`,
+  setupDesc: "Configure GLM usage widget (API Key, bar style, one/two-line layout)",
+  inputTitle: "Configure Zhipu API Key (queries the monitor endpoint, no quota consumed)",
+  inputPhHas: "Already configured, leave blank to keep",
+  inputPhNew: "Paste your Zhipu API Key",
+  keySaved: "✓ API Key saved to ~/.omp/agent/.omp-hud-glm-key",
+  keySaveFail: "Failed to save API Key; check file permissions",
+  keyNotSet: "API Key not set. Run setup again, or set env var ZHIPU_API_KEY.",
+  noInput: "Interactive input not supported here; configure the API Key manually",
+  selectBar: "Select bar style",
+  selectLayout: "Select layout",
+  current: "(current)",
+  layoutAuto: "auto Auto (wide one-line / narrow two-line)",
+  layoutOne: "one One line",
+  layoutTwo: "two Two lines",
+  saved: (bar: string, layout: string) => `Saved: bar ${bar}, layout ${layout}`,
+  barStyleLabel: (key: string): string => {
+    const m: Record<string, string> = {
+      block: "▰▱ Block", classic: "█░ Classic", dot: "●· Dot", line: "━─ Line",
+    };
+    return m[key] ?? key;
+  },
+  usageDesc: "Query GLM Coding Plan usage details",
+  noApiKey: "API Key not configured. Run /omp-hud-glm:setup, or set env var ZHIPU_API_KEY.",
+  emptyData: "Usage query returned empty data",
+  usageTitle: "GLM Coding Plan Usage",
+  labelPlan: "Plan",
+  label5h: "5h",
+  labelWeekly: "Weekly",
+  labelMcp: "MCP",
+  mcpCalls: (used: number, total: number) => `${used}/${total} calls`,
+  labelDetails: "Details",
+  closeHint: "Press Esc or q to close",
+  usageFail: (msg: string) => `GLM usage query failed: ${msg}`,
+  notifyNoKey: "GLM usage extension: no API Key detected. Run /omp-hud-glm:setup, or set env var ZHIPU_API_KEY.",
+  queryError: "query error",
+  quotaFail: "usage query failed",
+};
+
+type I18n = typeof zhStrings;
+const t: I18n = IS_ZH ? zhStrings : enStrings;
 
 interface OmpHudGlmConfig {
   barStyle: string;  // block | classic | dot | line
@@ -170,20 +292,21 @@ export async function resolveApiKey(): Promise<string | undefined> {
   return undefined;
 }
 
+// 重置倒计时格式化（中文「1小时38分」，英文「1h38m」）
 function fmtReset(ms?: number): string {
   if (!ms) return "";
   const diff = ms - Date.now();
-  if (diff <= 0) return "reset";
+  if (diff <= 0) return t.resetDone;
   const totalMin = Math.round(diff / 60000);
-  if (totalMin < 60) return `${totalMin}m`;
+  if (totalMin < 60) return t.durMin(totalMin);
   const h = Math.floor(totalMin / 60);
   const m = totalMin % 60;
   if (h >= 24) {
     const d = Math.floor(h / 24);
     const rh = h % 24;
-    return rh > 0 ? `${d}d${rh}h` : `${d}d`;
+    return rh > 0 ? t.durDayHour(d, rh) : t.durDay(d);
   }
-  return m > 0 ? `${h}h${m}m` : `${h}h`;
+  return m > 0 ? t.durHourMin(h, m) : t.durHour(h);
 }
 
 function fmtWindow(tokens: number): string {
@@ -247,10 +370,10 @@ function renderContextSegment(
   cu: { tokens?: number; contextWindow?: number; percent?: number } | null,
   style: string,
 ): string {
-  if (!cu || !cu.contextWindow) return fg(C_DIM, "上下文：暂无数据");
+  if (!cu || !cu.contextWindow) return fg(C_DIM, t.ctxNoData);
   const pct = Math.min(100, Math.max(0, cu.percent ?? 0));
   const used = cu.tokens ?? 0;
-  const tag = fg(C_ACCENT, "上下文");
+  const tag = fg(C_ACCENT, t.ctxLabel);
   const bar = coloredBar(pct, style);
   const pctC = fg(colorForUsage(pct), `${pct.toFixed(1)}%`);
   const detail = fg(C_DIM, `${fmtWindow(used)}/${fmtWindow(cu.contextWindow)}`);
@@ -260,7 +383,7 @@ function renderContextSegment(
 // GLM 段：标签 + 进度条 + 百分比 + 重置时间
 function renderGlmSegment(u: ParsedUsage, style: string): string {
   const c5 = colorForUsage(u.hour5UsedPct);
-  const tag = fg(C_ACCENT, `GLM${u.level ? " " + u.level.toUpperCase() : ""} 5h`);
+  const tag = fg(C_ACCENT, t.glmTag(u.level));
   const bar5 = coloredBar(u.hour5UsedPct, style);
   const pct5 = fg(c5, `${u.hour5UsedPct}%`);
   const reset5 = u.hour5ResetText ? fg(C_DIM, `·${u.hour5ResetText}`) : "";
@@ -270,18 +393,18 @@ function renderGlmSegment(u: ParsedUsage, style: string): string {
     const barW = coloredBar(u.weeklyUsedPct, style);
     const pctW = fg(cw, `${u.weeklyUsedPct}%`);
     const resetW = u.weeklyResetText ? fg(C_DIM, `·${u.weeklyResetText}`) : "";
-    seg += ` ${fg(C_ACCENT, "周")} ${barW} ${pctW} ${resetW}`;
+    seg += ` ${fg(C_ACCENT, t.weeklyTag)} ${barW} ${pctW} ${resetW}`;
   }
   return seg;
 }
 
-// 根据配置和终端宽度决定单行还是两行
+// 根据配置和终端宽度决定单行还是两行（中文更宽，阈值上调）
 function useOneLine(config: OmpHudGlmConfig): boolean {
   if (config.layout === "one") return true;
   if (config.layout === "two") return false;
   // auto：窄屏（手机）用两行，宽屏合并
   const cols = process.stdout.columns ?? parseInt(process.env.COLUMNS ?? "120", 10) ?? 120;
-  return cols >= 110;
+  return cols >= (IS_ZH ? 120 : 110);
 }
 
 // 渲染 widget 行（数组）：单行合并或两行分离
@@ -305,7 +428,7 @@ async function fetchUsage(apiKey: string): Promise<ParsedUsage | null> {
   });
   if (!res.ok) throw new Error(`HTTP ${res.status} ${res.statusText}`);
   const json = (await res.json()) as QuotaResponse;
-  if (!json.success) throw new Error(json.msg || "用量查询失败");
+  if (!json.success) throw new Error(json.msg || t.quotaFail);
   return parseUsage(json);
 }
 
@@ -338,14 +461,11 @@ export default function (pi): void {
       const cu = typeof ctx.getContextUsage === "function" ? ctx.getContextUsage() : null;
       ctx.ui?.setWidget?.(WIDGET_KEY, [
         ...renderWidgetLines(cu, null, config),
-        fg(C_ERR, "  GLM 用量：未配置 API Key"),
+        fg(C_ERR, t.widgetNoKey),
       ], { placement: "belowEditor" });
       if (!warnedMissingKey && ctx.ui?.notify) {
         warnedMissingKey = true;
-        ctx.ui.notify(
-          "GLM 用量扩展：未检测到 API Key。运行 /omp-hud-glm:setup 配置，或设置环境变量 ZHIPU_API_KEY。",
-          "warning",
-        );
+        ctx.ui.notify(t.notifyNoKey, "warning");
       }
       return;
     }
@@ -358,7 +478,7 @@ export default function (pi): void {
       const cu = typeof ctx.getContextUsage === "function" ? ctx.getContextUsage() : null;
       ctx.ui?.setWidget?.(WIDGET_KEY, [
         ...renderWidgetLines(cu, lastUsage, config),
-        fg(C_ERR, `  GLM：${e instanceof Error ? e.message : "查询出错"}`),
+        fg(C_ERR, t.widgetError(e instanceof Error ? e.message : t.queryError)),
       ], { placement: "belowEditor" });
     }
   }
@@ -391,54 +511,48 @@ export default function (pi): void {
 
   // /omp-hud-glm:setup：交互式配置（API Key、进度条样式、单行/双行布局）
   pi.registerCommand("omp-hud-glm:setup", {
-    description: "配置 GLM 用量 widget（API Key、进度条样式、单行/双行布局）",
+    description: t.setupDesc,
     handler: async (_args, ctx) => {
       // 1. 配置 API Key
       if (ctx.ui?.input) {
         const existingKey = await resolveApiKey();
-        const keyInput = await ctx.ui.input(
-          "配置智谱 API Key（用于查询用量，走 monitor 端点不消耗额度）",
-          existingKey ? "已配置，留空保持不变" : "粘贴你的智谱 API Key",
-        );
+        const keyInput = await ctx.ui.input(t.inputTitle, existingKey ? t.inputPhHas : t.inputPhNew);
         if (keyInput !== undefined) {
           const trimmed = keyInput.trim();
           if (trimmed) {
             try {
               await Bun.write(KEY_PATHS[0], trimmed);
               warnedMissingKey = false;
-              ctx.ui?.notify?.("✓ API Key 已保存到 ~/.omp/agent/.omp-hud-glm-key", "info");
+              ctx.ui?.notify?.(t.keySaved, "info");
             } catch {
-              ctx.ui?.notify?.("API Key 保存失败，请检查文件权限", "error");
+              ctx.ui?.notify?.(t.keySaveFail, "error");
             }
           } else if (!existingKey && !process.env.ZHIPU_API_KEY) {
-            ctx.ui?.notify?.(
-              "未设置 API Key。可运行 setup 重新配置，或设环境变量 ZHIPU_API_KEY。",
-              "warning",
-            );
+            ctx.ui?.notify?.(t.keyNotSet, "warning");
           }
         }
       } else {
-        ctx.ui?.notify?.("当前环境不支持交互式输入，请手动配置 API Key", "warning");
+        ctx.ui?.notify?.(t.noInput, "warning");
       }
 
       // 2. 选进度条样式
       const styleLabels = Object.entries(BAR_STYLES).map(
-        ([k, v]) => `${v.label}${k === config.barStyle ? " (当前)" : ""}`,
+        ([k]) => `${t.barStyleLabel(k)}${k === config.barStyle ? ` ${t.current}` : ""}`,
       );
-      const pickedStyle = await ctx.ui?.select?.("选择进度条样式", styleLabels);
+      const pickedStyle = await ctx.ui?.select?.(t.selectBar, styleLabels);
       if (!pickedStyle) return;
       const styleKey = Object.entries(BAR_STYLES).find(
-        ([, v]) => pickedStyle.startsWith(v.label),
+        ([k]) => pickedStyle.startsWith(t.barStyleLabel(k)),
       )?.[0];
       if (styleKey) config.barStyle = styleKey;
 
       // 3. 选布局
       const layoutLabels = [
-        `auto 自动（宽屏单行/窄屏双行）${config.layout === "auto" ? " (当前)" : ""}`,
-        `one 单行${config.layout === "one" ? " (当前)" : ""}`,
-        `two 双行${config.layout === "two" ? " (当前)" : ""}`,
+        `${t.layoutAuto}${config.layout === "auto" ? ` ${t.current}` : ""}`,
+        `${t.layoutOne}${config.layout === "one" ? ` ${t.current}` : ""}`,
+        `${t.layoutTwo}${config.layout === "two" ? ` ${t.current}` : ""}`,
       ];
-      const pickedLayout = await ctx.ui?.select?.("选择布局", layoutLabels);
+      const pickedLayout = await ctx.ui?.select?.(t.selectLayout, layoutLabels);
       if (!pickedLayout) return;
       if (pickedLayout.startsWith("auto")) config.layout = "auto";
       else if (pickedLayout.startsWith("one")) config.layout = "one";
@@ -449,59 +563,57 @@ export default function (pi): void {
       renderWidgets(ctx, lastUsage);
       void refreshGlm(ctx);
       ctx.ui?.notify?.(
-        `已保存：进度条 ${BAR_STYLES[config.barStyle].label}，布局 ${config.layout}`,
+        t.saved(t.barStyleLabel(config.barStyle), config.layout),
         "info",
       );
     },
   });
 
   pi.registerCommand("omp-hud-glm:usage", {
-    description: "查询 GLM Coding Plan 用量详情",
+    description: t.usageDesc,
     handler: async (_args, ctx) => {
       try {
         const apiKey = await resolveApiKey();
         if (!apiKey) {
-          ctx.ui?.notify?.(
-            "未配置 API Key。运行 /omp-hud-glm:setup 配置，或设置环境变量 ZHIPU_API_KEY。",
-            "error",
-          );
+          ctx.ui?.notify?.(t.noApiKey, "error");
           return;
         }
         const u = await fetchUsage(apiKey);
         if (!u) {
-          ctx.ui?.notify?.("用量查询返回空数据", "warning");
+          ctx.ui?.notify?.(t.emptyData, "warning");
           return;
         }
         // 用量百分比 → 主题色 token（自动适配深/浅色模式）
         const pctToken = (pct: number): "success" | "warning" | "error" =>
           pct >= 80 ? "error" : pct >= 50 ? "warning" : "success";
+        // 标签列宽：中文标签统一 2 字（4 列），英文标签更长（Weekly/Details=7 列）
+        const LABEL_W = IS_ZH ? 4 : 8;
         // 渲染详情行（用系统主题色，非自写 ANSI）
         const renderDetails = (theme: { fg: (c: string, t: string) => string }): string[] => {
           const out: string[] = [];
-          const LABEL_W = 4;
-          if (u.level) out.push(`${padVisible(theme.fg("accent", "套餐"), LABEL_W)} ${theme.fg("muted", u.level.toUpperCase())}`);
+          if (u.level) out.push(`${padVisible(theme.fg("accent", t.labelPlan), LABEL_W)} ${theme.fg("muted", u.level.toUpperCase())}`);
           const bar = (pct: number) => {
             const s = BAR_STYLES[config.barStyle] ?? BAR_STYLES.block;
             const filled = Math.round((pct / 100) * 10);
             return theme.fg(pctToken(pct), s.filled.repeat(filled)) + theme.fg("dim", s.empty.repeat(10 - filled));
           };
           out.push(
-            `${padVisible(theme.fg("accent", "5h"), LABEL_W)} ${bar(u.hour5UsedPct)} ${theme.fg(pctToken(u.hour5UsedPct), `${u.hour5UsedPct}%`)}${u.hour5ResetText ? " " + theme.fg("dim", `·${u.hour5ResetText}`) : ""}`,
+            `${padVisible(theme.fg("accent", t.label5h), LABEL_W)} ${bar(u.hour5UsedPct)} ${theme.fg(pctToken(u.hour5UsedPct), `${u.hour5UsedPct}%`)}${u.hour5ResetText ? " " + theme.fg("dim", `·${u.hour5ResetText}`) : ""}`,
           );
           if (u.hasWeekly) {
             out.push(
-              `${padVisible(theme.fg("accent", "每周"), LABEL_W)} ${bar(u.weeklyUsedPct)} ${theme.fg(pctToken(u.weeklyUsedPct), `${u.weeklyUsedPct}%`)}${u.weeklyResetText ? " " + theme.fg("dim", `·${u.weeklyResetText}`) : ""}`,
+              `${padVisible(theme.fg("accent", t.labelWeekly), LABEL_W)} ${bar(u.weeklyUsedPct)} ${theme.fg(pctToken(u.weeklyUsedPct), `${u.weeklyUsedPct}%`)}${u.weeklyResetText ? " " + theme.fg("dim", `·${u.weeklyResetText}`) : ""}`,
             );
           }
           if (u.mcpTotal != null) {
             const mcpPct = u.mcpTotal > 0 ? Math.round(((u.mcpUsed ?? 0) / u.mcpTotal) * 100) : 0;
             out.push(
-              `${padVisible(theme.fg("accent", "MCP"), LABEL_W)} ${theme.fg("muted", `${u.mcpUsed ?? 0}/${u.mcpTotal} 次`)} ${theme.fg(pctToken(mcpPct), `(${mcpPct}%)`)}`,
+              `${padVisible(theme.fg("accent", t.labelMcp), LABEL_W)} ${theme.fg("muted", t.mcpCalls(u.mcpUsed ?? 0, u.mcpTotal))} ${theme.fg(pctToken(mcpPct), `(${mcpPct}%)`)}`,
             );
             if (u.mcpDetails && u.mcpDetails.length > 0) {
-              // 明细内容与上方数值列对齐（标签2字+空格=第4列起），标签用 accent 统一
+              // 明细内容与上方数值列对齐（标签列宽+空格起），标签用 accent 统一
               const detail = u.mcpDetails.map((d) => `${d.modelCode} ${theme.fg("dim", String(d.usage))}`).join(theme.fg("dim", "  ·  "));
-              out.push(`${padVisible(theme.fg("accent", "明细"), LABEL_W)} ${detail}`);
+              out.push(`${padVisible(theme.fg("accent", t.labelDetails), LABEL_W)} ${detail}`);
             }
           }
           return out;
@@ -511,10 +623,10 @@ export default function (pi): void {
           (_tui, theme, _keybindings, done) => ({
             render(_width: number): readonly string[] {
               return [
-                theme.fg("accent", "GLM Coding Plan 用量"),
+                theme.fg("accent", t.usageTitle),
                 ...renderDetails(theme),
                 "",
-                theme.fg("dim", "按 Esc 或 q 关闭"),
+                theme.fg("dim", t.closeHint),
               ];
             },
             handleInput(data: string): void {
@@ -528,7 +640,7 @@ export default function (pi): void {
         );
       } catch (e) {
         ctx.ui?.notify?.(
-          `GLM 用量查询失败：${e instanceof Error ? e.message : String(e)}`,
+          t.usageFail(e instanceof Error ? e.message : String(e)),
           "error",
         );
       }
