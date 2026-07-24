@@ -471,33 +471,59 @@ export default function (pi): void {
           ctx.ui?.notify?.("用量查询返回空数据", "warning");
           return;
         }
-        // 渲染到 widget（真彩色，与状态栏一致的视觉），列对齐
-        const lines: string[] = [];
-        if (u.level) lines.push(`${fg(C_ACCENT, "套餐")} ${fg(C_DIM, u.level.toUpperCase())}`);
-        const LABEL_W = 4; // 标签列宽：5h / 每周 / MCP
-        const bar5 = coloredBar(u.hour5UsedPct, config.barStyle);
-        lines.push(
-          `${padVisible(fg(C_ACCENT, "5h"), LABEL_W)} ${bar5} ${fg(colorForUsage(u.hour5UsedPct), `${u.hour5UsedPct}%`)}${u.hour5ResetText ? " " + fg(C_DIM, `·${u.hour5ResetText}`) : ""}`,
-        );
-        if (u.hasWeekly) {
-          const barW = coloredBar(u.weeklyUsedPct, config.barStyle);
-          lines.push(
-            `${padVisible(fg(C_ACCENT, "每周"), LABEL_W)} ${barW} ${fg(colorForUsage(u.weeklyUsedPct), `${u.weeklyUsedPct}%`)}${u.weeklyResetText ? " " + fg(C_DIM, `·${u.weeklyResetText}`) : ""}`,
+        // 用量百分比 → 主题色 token（自动适配深/浅色模式）
+        const pctToken = (pct: number): "success" | "warning" | "error" =>
+          pct >= 80 ? "error" : pct >= 50 ? "warning" : "success";
+        // 渲染详情行（用系统主题色，非自写 ANSI）
+        const renderDetails = (theme: { fg: (c: string, t: string) => string }): string[] => {
+          const out: string[] = [];
+          if (u.level) out.push(`${theme.fg("accent", "套餐")} ${theme.fg("muted", u.level.toUpperCase())}`);
+          const LABEL_W = 4;
+          const bar = (pct: number) => {
+            const s = BAR_STYLES[config.barStyle] ?? BAR_STYLES.block;
+            const filled = Math.round((pct / 100) * 10);
+            return theme.fg(pctToken(pct), s.filled.repeat(filled)) + theme.fg("dim", s.empty.repeat(10 - filled));
+          };
+          out.push(
+            `${padVisible(theme.fg("accent", "5h"), LABEL_W)} ${bar(u.hour5UsedPct)} ${theme.fg(pctToken(u.hour5UsedPct), `${u.hour5UsedPct}%`)}${u.hour5ResetText ? " " + theme.fg("dim", `·${u.hour5ResetText}`) : ""}`,
           );
-        }
-        if (u.mcpTotal != null) {
-          const mcpPct = u.mcpTotal > 0 ? Math.round(((u.mcpUsed ?? 0) / u.mcpTotal) * 100) : 0;
-          const mcpLabel = padVisible(fg(C_ACCENT, "MCP"), LABEL_W);
-          lines.push(
-            `${mcpLabel} ${fg(C_DIM, `${u.mcpUsed ?? 0}/${u.mcpTotal} 次`)} ${fg(colorForUsage(mcpPct), `(${mcpPct}%)`)}`,
-          );
-          if (u.mcpDetails && u.mcpDetails.length > 0) {
-            const detail = u.mcpDetails.map((d) => `${d.modelCode} ${fg(C_DIM, String(d.usage))}`).join(fg(C_SEP, " · "));
-            lines.push(`${padVisible(fg(C_DIM, "明细"), LABEL_W)} ${detail}`);
+          if (u.hasWeekly) {
+            out.push(
+              `${padVisible(theme.fg("accent", "每周"), LABEL_W)} ${bar(u.weeklyUsedPct)} ${theme.fg(pctToken(u.weeklyUsedPct), `${u.weeklyUsedPct}%`)}${u.weeklyResetText ? " " + theme.fg("dim", `·${u.weeklyResetText}`) : ""}`,
+            );
           }
-        }
-        ctx.ui?.setWidget?.(WIDGET_KEY, lines, { placement: "belowEditor" });
-        ctx.ui?.notify?.("GLM 用量详情已显示在状态栏（5 分钟后自动恢复实时刷新）", "info");
+          if (u.mcpTotal != null) {
+            const mcpPct = u.mcpTotal > 0 ? Math.round(((u.mcpUsed ?? 0) / u.mcpTotal) * 100) : 0;
+            out.push(
+              `${padVisible(theme.fg("accent", "MCP"), LABEL_W)} ${theme.fg("muted", `${u.mcpUsed ?? 0}/${u.mcpTotal} 次`)} ${theme.fg(pctToken(mcpPct), `(${mcpPct}%)`)}`,
+            );
+            if (u.mcpDetails && u.mcpDetails.length > 0) {
+              const detail = u.mcpDetails.map((d) => `${d.modelCode} ${theme.fg("dim", String(d.usage))}`).join(theme.fg("dim", " · "));
+              out.push(`${padVisible(theme.fg("dim", "明细"), LABEL_W)} ${detail}`);
+            }
+          }
+          return out;
+        };
+        // 一次性 overlay 弹窗显示（不污染状态栏），Esc/q 关闭
+        await ctx.ui?.custom?.(
+          (_tui, theme, _keybindings, done) => ({
+            render(_width: number): readonly string[] {
+              return [
+                theme.fg("accent", "GLM Coding Plan 用量"),
+                ...renderDetails(theme),
+                "",
+                theme.fg("dim", "按 Esc 或 q 关闭"),
+              ];
+            },
+            handleInput(data: string): void {
+              // Esc / q / Enter / Ctrl-C 任一关闭（兼容不同终端的 Esc 编码）
+              if (data === "q" || data === "Q" || data === "\r" || data === "\n" ||
+                  data === "\x03" || data.startsWith("\x1b")) done(undefined);
+            },
+            invalidate(): void {},
+          }),
+          { overlay: true },
+        );
       } catch (e) {
         ctx.ui?.notify?.(
           `GLM 用量查询失败：${e instanceof Error ? e.message : String(e)}`,
