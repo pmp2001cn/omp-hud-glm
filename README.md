@@ -18,8 +18,8 @@ GLM Coding Plan 用量 + 上下文用量彩色状态栏扩展，用于 [Oh My Pi
 
 | 命令 | 作用 |
 |---|---|
-| `/glm-config` | 交互式配置面板：选进度条样式、选单行/两行布局 |
-| `/glm-usage` | 查询 GLM 用量详情（含套餐、5h、每周、MCP 各模型明细） |
+| `/omp-glm-config` | 交互式配置面板：选进度条样式、选单行/两行布局 |
+| `/omp-glm-usage` | 查询 GLM 用量详情（含套餐、5h、每周、MCP 各模型明细） |
 
 ## 安装
 
@@ -39,7 +39,7 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 
 ```yaml
 extensions:
-  - /path/to/omp-glm-hub/src/glm-hub.ts
+  - /path/to/omp-glm-hub/src/omp-glm-hub.ts
 ```
 
 > 注意：路径用正斜杠 `/`，不要用反斜杠。
@@ -51,7 +51,7 @@ GLM 用量查询需要智谱 API Key（与 `zhipu-coding-plan` provider 共用�
 **方式 A（推荐，私密）** — 写入 key 文件：
 
 ```powershell
-"你的智谱API_KEY" | Out-File -NoNewline "$env:USERPROFILE\.omp\agent\.glm-usage-key"
+"你的智谱API_KEY" | Out-File -NoNewline "$env:USERPROFILE\.omp\agent\.omp-glm-usage-key"
 ```
 
 **方式 B** — 设系统环境变量 `ZHIPU_API_KEY`。
@@ -60,7 +60,7 @@ GLM 用量查询需要智谱 API Key（与 `zhipu-coding-plan` provider 共用�
 
 ## 配置文件
 
-扩展配置持久化在 `~/.omp/agent/.glm-config.json`：
+扩展配置持久化在 `~/.omp/agent/.omp-glm-config.json`：
 
 ```json
 {
@@ -74,7 +74,7 @@ GLM 用量查询需要智谱 API Key（与 `zhipu-coding-plan` provider 共用�
 | `barStyle` | `block` / `classic` / `dot` / `line` | 进度条字符样式 |
 | `layout` | `auto` / `one` / `two` | auto 按终端宽度自动选单行/两行 |
 
-也可通过 `/glm-config` 命令交互式修改，即时生效并持久化。
+也可通过 `/omp-glm-config` 命令交互式修改，即时生效并持久化。
 
 ## 数据来源
 

@@ -5,10 +5,10 @@
 $ErrorActionPreference = "Stop"
 
 # 源文件绝对路径（转正斜杠，OMP 期望的格式）
-$srcPath = (Join-Path $PSScriptRoot "src\glm-hub.ts") -replace '\\', '/'
+$srcPath = (Join-Path $PSScriptRoot "src\omp-glm-hub.ts") -replace '\\', '/'
 
 if (-not (Test-Path ($srcPath -replace '/', '\'))) {
-    Write-Host "错误：找不到源文件 src\glm-hub.ts" -ForegroundColor Red
+    Write-Host "错误：找不到源文件 src\omp-glm-hub.ts" -ForegroundColor Red
     exit 1
 }
 
@@ -50,18 +50,21 @@ if ($normalized -contains $srcPath) {
     }
 }
 
-# 检查旧副本（从 extensions 目录自动发现的），提示清理
-$oldCopy = Join-Path $env:USERPROFILE ".omp\agent\extensions\glm-usage.ts"
-if (Test-Path $oldCopy) {
-    Write-Host ""
-    Write-Host "检测到旧副本：$oldCopy" -ForegroundColor Yellow
-    $ans = Read-Host "是否删除旧副本以避免重复加载？(y/N)"
-    if ($ans -eq 'y' -or $ans -eq 'Y') {
-        Remove-Item $oldCopy -Force
-        Write-Host "✓ 已删除旧副本" -ForegroundColor Green
+# 检查旧副本（历史版本曾用 glm-usage.ts / glm-hub.ts 拷贝到 extensions 目录），提示清理
+$extDir = Join-Path $env:USERPROFILE ".omp\agent\extensions"
+foreach ($oldName in @("glm-usage.ts", "glm-hub.ts")) {
+    $oldCopy = Join-Path $extDir $oldName
+    if (Test-Path $oldCopy) {
+        Write-Host ""
+        Write-Host "检测到旧副本：$oldCopy" -ForegroundColor Yellow
+        $ans = Read-Host "是否删除旧副本以避免重复加载？(y/N)"
+        if ($ans -eq 'y' -or $ans -eq 'Y') {
+            Remove-Item $oldCopy -Force
+            Write-Host "✓ 已删除旧副本" -ForegroundColor Green
+        }
     }
 }
 
 Write-Host ""
 Write-Host "完成！重启 OMP 生效。" -ForegroundColor Cyan
-Write-Host "运行 /glm-config 配置样式，/glm-usage 查询详情" -ForegroundColor DarkGray
+Write-Host "运行 /omp-glm-config 配置样式，/omp-glm-usage 查询详情" -ForegroundColor DarkGray
