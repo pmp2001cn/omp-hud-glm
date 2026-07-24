@@ -1,0 +1,17 @@
+# Node / Bun
+node_modules/
+dist/
+*.log
+
+# OMP 运行时产物（不入库）
+.glm-config.json
+.glm-usage-key
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# IDE
+.vscode/
+.idea/
