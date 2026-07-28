@@ -31,7 +31,8 @@ const BAR_STYLES: Record<string, { filled: string; empty: string }> = {
 
 // 颜色常量（真彩色，暗色背景调亮）
 const C_ACCENT = "#7aa2f7";
-const C_OK = "#9ece6a";
+const C_OK = "#9ece6a";       // 20–50%：暖黄绿（健康）
+const C_OK_BRIGHT = "#5af78e"; // <20%：鲜冷绿（极佳，与 C_OK 冷暖分离）
 const C_WARN = "#e0af68";
 const C_ERR = "#f7768e";
 const C_DIM = "#9aa5ce";
@@ -293,7 +294,8 @@ function fg(hex: string, text: string): string {
 function colorForUsage(usedPct: number): string {
   if (usedPct >= 80) return C_ERR;
   if (usedPct >= 50) return C_WARN;
-  return C_OK;
+  if (usedPct >= 20) return C_OK;
+  return C_OK_BRIGHT;
 }
 
 export async function resolveApiKey(): Promise<string | undefined> {
