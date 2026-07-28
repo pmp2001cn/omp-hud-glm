@@ -76,12 +76,15 @@ const zhStrings = {
   keyNotSet: "未设置 API Key。可运行 setup 重新配置，或设环境变量 ZHIPU_API_KEY。",
   noInput: "当前环境不支持交互式输入，请手动配置 API Key",
   selectBar: "选择进度条样式",
+  selectBarColor: "选择进度条着色模式",
+  colorModeMono: "mono 单色（整条统一颜色）",
+  colorModeSegment: "segment 分段着色（按阈值带渐变）",
   selectLayout: "选择布局",
   current: "(当前)",
   layoutAuto: "auto 自动（宽屏单行/窄屏双行）",
   layoutOne: "one 单行",
   layoutTwo: "two 双行",
-  saved: (bar: string, layout: string) => `已保存：进度条 ${bar}，布局 ${layout}`,
+  saved: (bar: string, layout: string, colorMode: string) => `已保存：进度条 ${bar}，着色 ${colorMode}，布局 ${layout}`,
   barStyleLabel: (key: string): string => {
     const m: Record<string, string> = {
       block: "▰▱ 实心方块", classic: "█░ 经典方块", dot: "●· 圆点", line: "━─ 细横线",
@@ -131,12 +134,15 @@ const enStrings = {
   keyNotSet: "API Key not set. Run setup again, or set env var ZHIPU_API_KEY.",
   noInput: "Interactive input not supported here; configure the API Key manually",
   selectBar: "Select bar style",
+  selectBarColor: "Select bar color mode",
+  colorModeMono: "mono Single color (whole bar)",
+  colorModeSegment: "segment Segmented (by threshold band)",
   selectLayout: "Select layout",
   current: "(current)",
   layoutAuto: "auto Auto (wide one-line / narrow two-line)",
   layoutOne: "one One line",
   layoutTwo: "two Two lines",
-  saved: (bar: string, layout: string) => `Saved: bar ${bar}, layout ${layout}`,
+  saved: (bar: string, layout: string, colorMode: string) => `Saved: bar ${bar}, color ${colorMode}, layout ${layout}`,
   barStyleLabel: (key: string): string => {
     const m: Record<string, string> = {
       block: "▰▱ Block", classic: "█░ Classic", dot: "●· Dot", line: "━─ Line",
@@ -181,11 +187,12 @@ function applyLanguage(language: string): void {
 
 interface OmpHudGlmConfig {
   barStyle: string;   // block | classic | dot | line
+  barColorMode: string; // mono | segment（进度条着色模式）
   layout: string;     // auto | one | two
   language: string;   // auto | zh | en
 }
 
-const DEFAULT_CONFIG: OmpHudGlmConfig = { barStyle: "block", layout: "auto", language: "auto" };
+const DEFAULT_CONFIG: OmpHudGlmConfig = { barStyle: "block", layout: "auto", language: "auto", barColorMode: "mono" };
 
 function agentDir(): string {
   const home = process.env.USERPROFILE || process.env.HOME || "";
@@ -215,6 +222,7 @@ async function loadConfig(): Promise<OmpHudGlmConfig> {
           barStyle: BAR_STYLES[c.barStyle] ? c.barStyle : "block",
           layout: ["auto", "one", "two"].includes(c.layout) ? c.layout : "auto",
           language: ["auto", "zh", "en"].includes(c.language) ? c.language : "auto",
+          barColorMode: ["mono", "segment"].includes(c.barColorMode) ? c.barColorMode : "mono",
         };
       }
     } catch {
@@ -369,11 +377,19 @@ export function parseUsage(resp: QuotaResponse): ParsedUsage | null {
 }
 
 // 彩色进度条（按配置样式）
-function coloredBar(usedPct: number, style: string, segments = 10): string {
+function coloredBar(usedPct: number, style: string, colorMode = "mono", segments = 10): string {
   const s = BAR_STYLES[style] ?? BAR_STYLES.block;
   const filled = Math.round((usedPct / 100) * segments);
-  const color = colorForUsage(usedPct);
-  return fg(color, s.filled.repeat(filled)) + fg(C_DIM, s.empty.repeat(segments - filled));
+  if (colorMode !== "segment") {
+    return fg(colorForUsage(usedPct), s.filled.repeat(filled)) + fg(C_DIM, s.empty.repeat(segments - filled));
+  }
+  // 分段着色：每段按所在阈值带取色（段起点百分比所在的用量区间）
+  const step = 100 / segments;
+  let bar = "";
+  for (let i = 0; i < segments; i++) {
+    bar += i < filled ? fg(colorForUsage(i * step), s.filled) : fg(C_DIM, s.empty);
+  }
+  return bar;
 }
 
 function plainBar(usedPct: number, style: string, segments = 16): string {
@@ -393,29 +409,30 @@ function padVisible(text: string, width: number): string {
 function renderContextSegment(
   cu: { tokens?: number; contextWindow?: number; percent?: number } | null,
   style: string,
+  colorMode: string = "mono",
 ): string {
   if (!cu || !cu.contextWindow) return fg(C_DIM, t.ctxNoData);
   const pct = Math.min(100, Math.max(0, cu.percent ?? 0));
   const used = cu.tokens ?? 0;
   const tag = fg(C_ACCENT, t.ctxLabel);
-  const bar = coloredBar(pct, style);
+  const bar = coloredBar(pct, style, colorMode);
   const pctC = fg(colorForUsage(pct), `${pct.toFixed(1)}%`);
   const detail = fg(C_DIM, `${fmtWindow(used)}/${fmtWindow(cu.contextWindow)}`);
   return `${tag} ${bar} ${pctC} ${detail}`;
 }
 
 // GLM 段：标签 + 进度条 + 百分比 + 重置时间
-function renderGlmSegment(u: ParsedUsage, style: string): string {
+function renderGlmSegment(u: ParsedUsage, style: string, colorMode: string = "mono"): string {
   const c5 = colorForUsage(u.hour5UsedPct);
   const tag = fg(C_ACCENT, t.glmTag(u.level));
-  const bar5 = coloredBar(u.hour5UsedPct, style);
+  const bar5 = coloredBar(u.hour5UsedPct, style, colorMode);
   const pct5 = fg(c5, `${u.hour5UsedPct}%`);
   const _r5 = fmtReset(u.hour5ResetMs);
   const reset5 = _r5 ? fg(C_DIM, `·${_r5}`) : "";
   let seg = `${tag} ${bar5} ${pct5} ${reset5}`;
   if (u.hasWeekly) {
     const cw = colorForUsage(u.weeklyUsedPct);
-    const barW = coloredBar(u.weeklyUsedPct, style);
+    const barW = coloredBar(u.weeklyUsedPct, style, colorMode);
     const pctW = fg(cw, `${u.weeklyUsedPct}%`);
     const _rW = fmtReset(u.weeklyResetMs);
     const resetW = _rW ? fg(C_DIM, `·${_rW}`) : "";
@@ -439,9 +456,9 @@ export function renderWidgetLines(
   u: ParsedUsage | null,
   config: OmpHudGlmConfig,
 ): string[] {
-  const ctxSeg = renderContextSegment(cu, config.barStyle);
+  const ctxSeg = renderContextSegment(cu, config.barStyle, config.barColorMode);
   if (!u) return [`  ${ctxSeg}`];
-  const glmSeg = renderGlmSegment(u, config.barStyle);
+  const glmSeg = renderGlmSegment(u, config.barStyle, config.barColorMode);
   if (useOneLine(config)) {
     return [`  ${ctxSeg} ${fg(C_SEP, "│")} ${glmSeg}`];
   }
@@ -587,8 +604,16 @@ export default function (pi): void {
         ([k]) => pickedStyle.startsWith(t.barStyleLabel(k)),
       )?.[0];
       if (styleKey) config.barStyle = styleKey;
+      // 4. 选进度条着色模式
+      const colorModeLabels = [
+        `${t.colorModeMono}${config.barColorMode === "mono" ? ` ${t.current}` : ""}`,
+        `${t.colorModeSegment}${config.barColorMode === "segment" ? ` ${t.current}` : ""}`,
+      ];
+      const pickedColor = await ctx.ui?.select?.(t.selectBarColor, colorModeLabels);
+      if (!pickedColor) return;
+      config.barColorMode = pickedColor.startsWith("segment") ? "segment" : "mono";
 
-      // 4. 选布局
+      // 5. 选布局
       const layoutLabels = [
         `${t.layoutAuto}${config.layout === "auto" ? ` ${t.current}` : ""}`,
         `${t.layoutOne}${config.layout === "one" ? ` ${t.current}` : ""}`,
@@ -605,7 +630,7 @@ export default function (pi): void {
       renderWidgets(ctx, lastUsage);
       void refreshGlm(ctx);
       ctx.ui?.notify?.(
-        t.saved(t.barStyleLabel(config.barStyle), config.layout),
+        t.saved(t.barStyleLabel(config.barStyle), config.layout, config.barColorMode),
         "info",
       );
     },
