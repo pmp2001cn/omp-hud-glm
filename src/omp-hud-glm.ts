@@ -78,7 +78,6 @@ const zhStrings = {
   selectBar: "选择进度条样式",
   selectBarColor: "选择进度条着色模式",
   colorModeMono: "mono 单色（整条统一颜色）",
-  colorModeSegment: "segment 分段着色（按阈值带渐变）",
   colorModeGradient: "gradient 渐变过渡（四色平滑过渡）",
   selectLayout: "选择布局",
   current: "(当前)",
@@ -137,7 +136,6 @@ const enStrings = {
   selectBar: "Select bar style",
   selectBarColor: "Select bar color mode",
   colorModeMono: "mono Single color (whole bar)",
-  colorModeSegment: "segment Segmented (by threshold band)",
   colorModeGradient: "gradient Smooth blend (4-color gradient)",
   selectLayout: "Select layout",
   current: "(current)",
@@ -224,7 +222,7 @@ async function loadConfig(): Promise<OmpHudGlmConfig> {
           barStyle: BAR_STYLES[c.barStyle] ? c.barStyle : "block",
           layout: ["auto", "one", "two"].includes(c.layout) ? c.layout : "auto",
           language: ["auto", "zh", "en"].includes(c.language) ? c.language : "auto",
-          barColorMode: ["mono", "segment", "gradient"].includes(c.barColorMode) ? c.barColorMode : "mono",
+          barColorMode: ["mono", "gradient"].includes(c.barColorMode) ? c.barColorMode : c.barColorMode === "segment" ? "gradient" : "mono",
         };
       }
     } catch {
@@ -405,17 +403,15 @@ function coloredBar(usedPct: number, style: string, colorMode = "mono", segments
   const s = BAR_STYLES[style] ?? BAR_STYLES.block;
   const filled = Math.round((usedPct / 100) * segments);
   // mono：整条按总水位单色
-  if (colorMode !== "segment" && colorMode !== "gradient") {
+  if (colorMode !== "gradient") {
     return fg(colorForUsage(usedPct), s.filled.repeat(filled)) + fg(C_DIM, s.empty.repeat(segments - filled));
   }
-  // segment / gradient：逐段取色
+  // gradient：逐段取段中点做渐变插值
   const step = 100 / segments;
   let bar = "";
   for (let i = 0; i < segments; i++) {
     if (i >= filled) { bar += fg(C_DIM, s.empty); continue; }
-    // gradient 取段中点做线性插值；segment 取段起点做阈值分档
-    const c = colorMode === "gradient" ? gradientColor((i + 0.5) * step) : colorForUsage(i * step);
-    bar += fg(c, s.filled);
+    bar += fg(gradientColor((i + 0.5) * step), s.filled);
   }
   return bar;
 }
@@ -632,17 +628,15 @@ export default function (pi): void {
         ([k]) => pickedStyle.startsWith(t.barStyleLabel(k)),
       )?.[0];
       if (styleKey) config.barStyle = styleKey;
-      // 4. 选进度条着色模式（每项附预览进度条，88% 水位可展示完整色谱）
-      const previewBar = (mode: string): string => `  ${coloredBar(88, config.barStyle, mode, 10)}`;
+      // 4. 选进度条着色模式（每项附满格预览，展示完整色谱，无空灰段）
+      const previewBar = (mode: string): string => `  ${coloredBar(100, config.barStyle, mode, 10)}`;
       const colorModeLabels = [
         `${t.colorModeMono}${config.barColorMode === "mono" ? ` ${t.current}` : ""}${previewBar("mono")}`,
-        `${t.colorModeSegment}${config.barColorMode === "segment" ? ` ${t.current}` : ""}${previewBar("segment")}`,
         `${t.colorModeGradient}${config.barColorMode === "gradient" ? ` ${t.current}` : ""}${previewBar("gradient")}`,
       ];
       const pickedColor = await ctx.ui?.select?.(t.selectBarColor, colorModeLabels);
       if (!pickedColor) return;
-      config.barColorMode = pickedColor.startsWith("gradient") ? "gradient"
-        : pickedColor.startsWith("segment") ? "segment" : "mono";
+      config.barColorMode = pickedColor.startsWith("gradient") ? "gradient" : "mono";
 
       // 5. 选布局
       const layoutLabels = [
