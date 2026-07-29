@@ -618,9 +618,10 @@ export default function (pi): void {
         ctx.ui?.notify?.(t.noInput, "warning");
       }
 
-      // 3. 选进度条样式
+      // 3. 选进度条样式（每项附满格预览，用当前着色模式渲染）
+      const stylePreview = (k: string) => `  ${coloredBar(100, k, config.barColorMode, 10)}`;
       const styleLabels = Object.entries(BAR_STYLES).map(
-        ([k]) => `${t.barStyleLabel(k)}${k === config.barStyle ? ` ${t.current}` : ""}`,
+        ([k]) => `${t.barStyleLabel(k)}${k === config.barStyle ? ` ${t.current}` : ""}${stylePreview(k)}`,
       );
       const pickedStyle = await ctx.ui?.select?.(t.selectBar, styleLabels);
       if (!pickedStyle) return;
